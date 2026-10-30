@@ -2,16 +2,16 @@
 
 ![Context Diet](assets/cover.png)
 
-Two things Claude Code doesn't show you while you work: **how close you are to your limits**, and **how many tokens every request spends before you've typed a word**. Context Diet puts both under your prompt, all the time, and helps you cut the second one.
+Two things Claude Code doesn't show you while you work: **how close you are to your limits**, and **how many tokens every request spends before you've typed a word**. Context Diet puts both right above your prompt, all the time, and helps you cut the second one.
 
 ![The gauge, the diet band and the savings counter](assets/demo.gif)
 
 ## What you get
 
-**1. A live gauge under the prompt.** Always on, no command needed:
+**1. A live gauge above the prompt.** Always on, no command needed. The bar is drawn in your theme's colors: orange normally, amber past 80%, red past 95%.
 
 ```
-5h ▓▓▓░░░░░ 37% · resets in 2h14 · week 16% · ctx 62k/200k · startup 62k · saved 112k
+5h ████░░░░░░ 37% resets in 2h14  ·  week 16%  ·  ctx 62k/200k  ·  startup 62k  ·  saved 112k
 ```
 
 | Part | Meaning |
@@ -61,7 +61,7 @@ Requires a recent Claude Code with mods support (`claude update`). Inside Claude
 
 On Claude Code 2.1.275 or later this also works in one step: `/plugin install context-diet --marketplace KemalHub/context-diet`.
 
-Restart Claude Code. The gauge appears under the prompt after the first reply.
+Restart Claude Code. The gauge appears above the prompt; the limits fill in after the first reply.
 
 For a local install from a clone:
 

@@ -1,6 +1,6 @@
 {
   "name": "context-diet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A live gauge of your Claude Code limits and context, plus a diet for your startup context: finds the MCP servers, skill plugins and memory you load on every request but never use, and slims them with one key.",
   "author": { "name": "Kemal Altınok" },
   "license": "MIT",

@@ -1,6 +1,6 @@
 // Context Diet — a Claude Code mod.
 //
-// 1. Gauge: a status line under the prompt with your live limits and context,
+// 1. Gauge: a colored line above the prompt with your live limits and context,
 //    straight from Claude Code ($.session.usage). No model calls, no tokens.
 // 2. Usage log: remembers which MCP servers and skill plugins you actually use.
 // 3. Finder: reads the same breakdown /context shows (counted locally) and adds up
@@ -36,7 +36,6 @@ let dietThisSession = false
 const NOISE = 500 // startup estimates wobble a little between sessions
 
 const k = (n) => (n >= 1e6 ? +(n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(Math.round(n)))
-const bar = (p) => { const n = Math.max(0, Math.min(8, Math.round(p / 12.5))); return '▓'.repeat(n) + '░'.repeat(8 - n) }
 
 function untilText(iso) {
   if (!iso) return ''
@@ -47,17 +46,33 @@ function untilText(iso) {
   return h >= 24 ? `resets in ${Math.round(h / 24)}d` : h > 0 ? `resets in ${h}h${String(m).padStart(2, '0')}` : `resets in ${m}m`
 }
 
-function gaugeText() {
-  const parts = []
+// The gauge as colored pieces: [text, style]. style: claude | success | warning | error | dim | plain
+function gaugeParts() {
+  const out = []
+  const sep = () => out.push(['  ·  ', 'dim'])
   const five = limits.find((l) => l.kind === 'five_hour')
   const week = limits.find((l) => l.kind === 'seven_day')
-  if (five) parts.push(`5h ${bar(five.percentUsed)} ${Math.round(five.percentUsed)}% · ${untilText(five.resetsAt)}`)
-  else parts.push('5h ░░░░░░░░ waiting for the first reply')
-  if (week) parts.push(`week ${Math.round(week.percentUsed)}%`)
-  if (ctx.window) parts.push(`ctx ${ctx.tokens === undefined ? '–' : k(ctx.tokens)}/${k(ctx.window)}`)
-  if (startup !== null) parts.push(`startup ${k(startup)}`)
-  if (saved > 0) parts.push(`saved ${k(saved)}`)
-  return parts.join(' · ')
+  const level = (p) => (p >= 95 ? 'error' : p >= 80 ? 'warning' : 'claude')
+  out.push(['5h ', 'dim'])
+  if (five) {
+    const n = Math.max(0, Math.min(10, Math.round(five.percentUsed / 10)))
+    out.push(['█'.repeat(n), level(five.percentUsed)], ['░'.repeat(10 - n), 'dim'])
+    out.push([` ${Math.round(five.percentUsed)}%`, five.percentUsed >= 80 ? level(five.percentUsed) : 'plain'], [` ${untilText(five.resetsAt)}`, 'dim'])
+  } else out.push(['░░░░░░░░░░', 'dim'], [' waiting for the first reply', 'dim'])
+  if (week) { sep(); out.push(['week ', 'dim'], [`${Math.round(week.percentUsed)}%`, week.percentUsed >= 80 ? level(week.percentUsed) : 'plain']) }
+  if (ctx.window) { sep(); out.push(['ctx ', 'dim'], [`${ctx.tokens === undefined ? '–' : k(ctx.tokens)}`, 'plain'], [`/${k(ctx.window)}`, 'dim']) }
+  if (startup !== null) { sep(); out.push(['startup ', 'dim'], [k(startup), 'plain']) }
+  if (saved > 0) { sep(); out.push(['saved ', 'dim'], [k(saved), 'success']) }
+  return out
+}
+
+const STYLE = {
+  claude: { color: 'claude', bold: true },
+  success: { color: 'success', bold: true },
+  warning: { color: 'warning', bold: true },
+  error: { color: 'error', bold: true },
+  dim: { dimColor: true },
+  plain: {},
 }
 
 // Takes a usage reading; returns a warning to toast, or null.
@@ -187,9 +202,9 @@ export function register(on) {
     const z = await $.store.get('snoozeUntil')
     if (typeof z === 'number') snoozeUntil = z
     try { takeUsage(await $.session.usage()) } catch { /* not ready yet */ }
-    $.ui.status(gaugeText())
+    $.ui.invalidate('ui.render')
     $.clock.every(30_000, async () => {
-      $.ui.status(gaugeText())
+      $.ui.invalidate('ui.render')
       if (!dirty) return
       dirty = false
       await $.store.set('log', log)
@@ -198,7 +213,6 @@ export function register(on) {
     void (async () => {
       try {
         if (takeBreakdown(await $.session.usage({ breakdown: 'summary' }), false)) await $.store.set('baseline', baseline)
-        $.ui.status(gaugeText())
         $.ui.invalidate('ui.render')
       } catch { /* no breakdown before the first reply; turn.complete retries */ }
     })()
@@ -208,7 +222,7 @@ export function register(on) {
   on('session.measure', async ($, e, next) => {
     const warning = takeUsage(e)
     if (warning) $.ui.toast(warning)
-    $.ui.status(gaugeText())
+    $.ui.invalidate('ui.render')
     return next(e)
   })
 
@@ -219,7 +233,7 @@ export function register(on) {
         $.ui.invalidate('ui.render')
       } catch { /* try again next turn */ }
     }
-    $.ui.status(gaugeText())
+    $.ui.invalidate('ui.render')
     if (dirty) {
       dirty = false
       await $.store.set('log', log)
@@ -276,38 +290,44 @@ export function register(on) {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const theirs = await next(e)
-    const show = !dietThisSession && findings && !findings.learning && findings.total >= MIN_SAVING && Date.now() > snoozeUntil
-    if (!show || (e.props && e.props.isWorking)) return theirs
     try {
       const { Box, Text, Button } = $.ui.resolve(e)
-      const top = [...findings.servers, ...findings.plugins][0]
-      const hint = top ? ` (${top.name} alone is ${k(top.tokens)})` : ''
-      const line = Box({
+      const rows = theirs ? [theirs] : []
+      const showBand = !dietThisSession && findings && !findings.learning && findings.total >= MIN_SAVING && Date.now() > snoozeUntil && !(e.props && e.props.isWorking)
+      if (showBand) {
+        const top = [...findings.servers, ...findings.plugins][0]
+        const hint = top ? ` (${top.name} alone is ${k(top.tokens)})` : ''
+        rows.push(Box({
+          flexDirection: 'row',
+          columnGap: 2,
+          children: [
+            Text({ color: 'warning', children: [`Context Diet: startup is ${k(startup)}, ~${k(findings.total)} of it you don't use${hint}`] }),
+            Button({
+              key: 'diet', label: 'diet', hotkey: '1', plain: true,
+              onPress: async () => {
+                if (baseline === null) { baseline = startup; await $.store.set('dietBaseline', baseline) }
+                dietThisSession = true
+                $.ui.invalidate('ui.render')
+                const text = dietPrompt()
+                $.clock.after(50, () => { void $.prompt.submit({ text, asUser: true }) })
+              },
+            }),
+            Button({
+              key: 'later', label: 'later', hotkey: '2', plain: true, dimColor: true,
+              onPress: async () => {
+                snoozeUntil = Date.now() + SNOOZE_DAYS * DAY
+                await $.store.set('snoozeUntil', snoozeUntil)
+                $.ui.invalidate('ui.render')
+              },
+            }),
+          ],
+        }))
+      }
+      rows.push(Box({
         flexDirection: 'row',
-        columnGap: 2,
-        children: [
-          Text({ children: [`Context Diet: startup is ${k(startup)}, ~${k(findings.total)} of it you don't use${hint}`] }),
-          Button({
-            key: 'diet', label: 'diet', hotkey: '1', plain: true,
-            onPress: async () => {
-              if (baseline === null) { baseline = startup; await $.store.set('dietBaseline', baseline) }
-              dietThisSession = true
-              $.ui.invalidate('ui.render')
-              const text = dietPrompt()
-              $.clock.after(50, () => { void $.prompt.submit({ text, asUser: true }) })
-            },
-          }),
-          Button({
-            key: 'later', label: 'later', hotkey: '2', plain: true, dimColor: true,
-            onPress: async () => {
-              snoozeUntil = Date.now() + SNOOZE_DAYS * DAY
-              await $.store.set('snoozeUntil', snoozeUntil)
-              $.ui.invalidate('ui.render')
-            },
-          }),
-        ],
-      })
-      return theirs ? Box({ flexDirection: 'column', children: [theirs, line] }) : line
+        children: gaugeParts().map(([t, st]) => Text({ ...STYLE[st], children: [t] })),
+      }))
+      return rows.length === 1 ? rows[0] : Box({ flexDirection: 'column', children: rows })
     } catch {
       return theirs
     }
