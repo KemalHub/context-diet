@@ -1,0 +1,11 @@
+{
+  "name": "context-diet",
+  "owner": { "name": "Kemal Altınok" },
+  "plugins": [
+    {
+      "name": "context-diet",
+      "source": "./plugin",
+      "description": "A live gauge of your limits and context, plus a diet for your startup context."
+    }
+  ]
+}
